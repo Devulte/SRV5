@@ -51,13 +51,15 @@ class DataSourceConfig:
     # Data source specific limits
     TUSHARE_DAILY_LIMIT: int = 200  # requests per minute
     AKSHARE_BATCH_SIZE: int = 50  # stocks per request
+    TINYSHARE_NEWS_LIMIT: int = 100  # news items per request
     
     def __post_init__(self):
         if self.SOURCE_PRIORITY is None:
             self.SOURCE_PRIORITY = {
-                'akshare': 3,    # Fastest for real-time
-                'tushare': 2,    # Most comprehensive
-                'baostock': 1    # Fallback
+                'akshare': 4,     # Fastest for real-time data
+                'tinyshare': 3,   # Best for news data
+                'tushare': 2,     # Most comprehensive stock data
+                'baostock': 1     # Fallback
             }
 
 @dataclass
@@ -69,10 +71,15 @@ class AlgorithmConfig:
     # Model parameters
     ENABLE_ADVANCED_ML: bool = False  # Disable complex models for speed
     ENABLE_HYPERPARAMETER_TUNING: bool = False
+    ENABLE_NEWS_SENTIMENT: bool = True  # Enable news sentiment analysis
     
     # Scoring thresholds
     MIN_SCORE_THRESHOLD: float = 0.3
     TOP_N_DEFAULT: int = 10
+    
+    # News sentiment configuration
+    NEWS_SENTIMENT_WEIGHT: float = 0.15  # Weight of news sentiment in final score
+    NEWS_LOOKBACK_DAYS: int = 7  # Days to look back for news
     
     def __post_init__(self):
         if self.FACTOR_WEIGHTS is None:
@@ -80,8 +87,39 @@ class AlgorithmConfig:
                 'northbuy': 0.3,
                 'turnover': 0.25,
                 'callback': 0.25,
-                'dt_ratio': 0.2
+                'dt_ratio': 0.15,
+                'news_sentiment': 0.05  # Add news sentiment factor
             }
+
+@dataclass
+class NewsConfig:
+    """News processing configuration"""
+    # TinyShare configuration
+    TINYSHARE_TOKEN: str = "2cGxAf73bwxidFp688OMckn24Ie2Glw9B61H8gmqbs0200FGv46J8jVd8718e62c"
+    TINYSHARE_BASE_URL: str = "https://api.tinyshare.cn"
+    
+    # News processing limits
+    MAX_NEWS_PER_STOCK: int = 20
+    NEWS_CACHE_TTL: int = 1800  # 30 minutes
+    
+    # Sentiment analysis keywords
+    POSITIVE_KEYWORDS: List[str] = None
+    NEGATIVE_KEYWORDS: List[str] = None
+    
+    def __post_init__(self):
+        if self.POSITIVE_KEYWORDS is None:
+            self.POSITIVE_KEYWORDS = [
+                '上涨', '利好', '增长', '盈利', '突破', '创新', '扩张', '收购',
+                '合作', '签约', '中标', '获批', '升级', '优化', '领先', '成功',
+                '业绩', '分红', '回购', '重组', '转型', '发展', '机遇', '潜力'
+            ]
+        
+        if self.NEGATIVE_KEYWORDS is None:
+            self.NEGATIVE_KEYWORDS = [
+                '下跌', '亏损', '风险', '下滑', '危机', '违约', '退市', '暂停',
+                '调查', '处罚', '诉讼', '减持', '质押', '债务', '亏损', '停产',
+                '裁员', '关闭', '取消', '延期', '失败', '问题', '困难', '挑战'
+            ]
 
 class AppConfig:
     """Main application configuration"""
@@ -91,6 +129,7 @@ class AppConfig:
         self.ui = UIConfig() 
         self.data_sources = DataSourceConfig()
         self.algorithms = AlgorithmConfig()
+        self.news = NewsConfig()
         
         # Environment-based overrides
         self._apply_env_overrides()
@@ -113,10 +152,24 @@ class AppConfig:
             
         if os.getenv('ENABLE_HYPERPARAMETER_TUNING', '').lower() == 'true':
             self.algorithms.ENABLE_HYPERPARAMETER_TUNING = True
+        
+        if os.getenv('ENABLE_NEWS_SENTIMENT', '').lower() == 'false':
+            self.algorithms.ENABLE_NEWS_SENTIMENT = False
+        
+        # News configuration overrides
+        if os.getenv('TINYSHARE_TOKEN'):
+            self.news.TINYSHARE_TOKEN = os.getenv('TINYSHARE_TOKEN')
+        
+        if os.getenv('NEWS_LOOKBACK_DAYS'):
+            self.algorithms.NEWS_LOOKBACK_DAYS = int(os.getenv('NEWS_LOOKBACK_DAYS'))
     
     def get_tushare_token(self) -> Optional[str]:
         """Get Tushare token from environment or config"""
         return os.getenv('TUSHARE_TOKEN', '2876ea85cb005fb5fa17c809a98174f2d5aae8b1f830110a5ead6211')
+    
+    def get_tinyshare_token(self) -> str:
+        """Get TinyShare token from environment or config"""
+        return os.getenv('TINYSHARE_TOKEN', self.news.TINYSHARE_TOKEN)
     
     def is_development(self) -> bool:
         """Check if running in development mode"""
@@ -134,3 +187,4 @@ PERFORMANCE_CONFIG = config.performance
 UI_CONFIG = config.ui
 DATA_SOURCE_CONFIG = config.data_sources
 ALGORITHM_CONFIG = config.algorithms
+NEWS_CONFIG = config.news
