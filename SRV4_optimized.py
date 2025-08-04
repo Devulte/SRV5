@@ -65,6 +65,12 @@ def import_data_sources():
         pass
     
     try:
+        import tinyshare as tns
+        sources['tinyshare'] = tns
+    except ImportError:
+        pass
+    
+    try:
         import jieba
         sources['jieba'] = jieba
     except ImportError:
@@ -104,6 +110,17 @@ class AppConfig:
         return start_date.strftime('%Y%m%d'), end_date.strftime('%Y%m%d')
 
 config = AppConfig()
+
+# Import TinyShare integration
+try:
+    from tinyshare_integration import news_processor, sentiment_analyzer
+    TINYSHARE_AVAILABLE = True
+    logger.info("TinyShare integration loaded successfully")
+except ImportError as e:
+    TINYSHARE_AVAILABLE = False
+    news_processor = None
+    sentiment_analyzer = None
+    logger.warning(f"TinyShare integration not available: {e}")
 
 # Memory-efficient data structures
 class DataCache:
@@ -317,19 +334,19 @@ class FactorCalculator:
 
 # Simplified scoring system
 class ScoreCalculator:
-    """Lightweight scoring system"""
+    """Lightweight scoring system with news sentiment integration"""
     
     def __init__(self):
         self.imports = get_heavy_imports()
         self.np = self.imports['np']
     
-    def compute_score(self, factors: Dict[str, float], daily_data: 'pd.DataFrame') -> Dict[str, float]:
-        """Simplified scoring algorithm"""
+    def compute_score(self, factors: Dict[str, float], daily_data: 'pd.DataFrame', stock_code: str = None) -> Dict[str, float]:
+        """Enhanced scoring algorithm with news sentiment"""
         try:
             # Simple weighted average of factors
             factor_values = list(factors.values())
             if not factor_values:
-                return {'final_score': 0.5, 'is_realtime': False}
+                return {'final_score': 0.5, 'is_realtime': False, 'news_sentiment': 0.0}
             
             # Normalize to 0-1 range
             max_val = max(factor_values) if factor_values else 1
@@ -337,27 +354,57 @@ class ScoreCalculator:
             range_val = max_val - min_val if max_val != min_val else 1
             
             normalized_scores = [(v - min_val) / range_val for v in factor_values]
-            final_score = self.np.mean(normalized_scores)
+            base_score = self.np.mean(normalized_scores)
             
             # Add momentum bonus
             if not daily_data.empty and len(daily_data) >= 2:
                 recent_change = daily_data['pct_change'].tail(2).mean() if 'pct_change' in daily_data else 0
                 if recent_change > 0:
-                    final_score += 0.1
+                    base_score += 0.1
+            
+            # Calculate news sentiment if TinyShare is available
+            news_sentiment = self._get_news_sentiment(stock_code)
+            
+            # Combine base score with news sentiment
+            sentiment_weight = 0.15  # 15% weight for news sentiment
+            final_score = (1 - sentiment_weight) * base_score + sentiment_weight * (news_sentiment + 1) / 2
             
             is_realtime = daily_data.get('is_realtime', pd.Series([False])).iloc[0] if not daily_data.empty and 'is_realtime' in daily_data else False
             
             return {
                 'final_score': float(self.np.clip(final_score, 0, 1)),
-                'catboost_prob': final_score,
-                'lstm_score': final_score,
-                'sentiment_score': 0.5,  # Simplified
+                'catboost_prob': base_score,
+                'lstm_score': base_score,
+                'sentiment_score': news_sentiment,
+                'news_sentiment': news_sentiment,
                 'is_realtime': bool(is_realtime)
             }
             
         except Exception as e:
             logger.warning(f"Score calculation error: {e}")
-            return {'final_score': 0.5, 'is_realtime': False}
+            return {'final_score': 0.5, 'is_realtime': False, 'news_sentiment': 0.0}
+    
+    def _get_news_sentiment(self, stock_code: str) -> float:
+        """Get news sentiment for a stock"""
+        if not TINYSHARE_AVAILABLE or not stock_code or not news_processor:
+            return 0.0
+        
+        try:
+            # Get recent news for the stock
+            news_items = news_processor.get_cached_news(stock_code, days_back=7)
+            
+            if not news_items:
+                return 0.0
+            
+            # Calculate sentiment metrics
+            sentiment_metrics = news_processor.calculate_stock_sentiment(news_items)
+            
+            # Use recent sentiment with fallback to overall sentiment
+            return sentiment_metrics.get('recent_sentiment', sentiment_metrics.get('overall_sentiment', 0.0))
+            
+        except Exception as e:
+            logger.warning(f"Error getting news sentiment for {stock_code}: {e}")
+            return 0.0
 
 # Main application class
 class StockRecommendationApp:
@@ -386,6 +433,39 @@ class StockRecommendationApp:
             # Update config
             config.DEFAULT_DAYS_BACK = days_back
             config.DEFAULT_TOP_N = top_n
+            
+            # News testing section
+            if TINYSHARE_AVAILABLE:
+                st.subheader("📰 新闻测试")
+                test_stock = st.text_input("测试股票代码", placeholder="例如: 000001")
+                
+                if st.button("测试新闻获取"):
+                    if test_stock and news_processor:
+                        with st.spinner(f"获取 {test_stock} 的新闻..."):
+                            try:
+                                news_items = news_processor.get_cached_news(test_stock, days_back=3)
+                                if news_items:
+                                    st.success(f"成功获取 {len(news_items)} 条新闻")
+                                    
+                                    # Show sentiment metrics
+                                    sentiment_metrics = news_processor.calculate_stock_sentiment(news_items)
+                                    col1, col2 = st.columns(2)
+                                    with col1:
+                                        st.metric("整体情绪", f"{sentiment_metrics['overall_sentiment']:.3f}")
+                                    with col2:
+                                        st.metric("近期情绪", f"{sentiment_metrics['recent_sentiment']:.3f}")
+                                    
+                                    # Show sample news
+                                    with st.expander("查看新闻样例"):
+                                        for i, news in enumerate(news_items[:3]):
+                                            st.markdown(f"**{i+1}. {news['title']}**")
+                                            st.markdown(f"情绪得分: {news['sentiment_score']:.3f}")
+                                            st.markdown(f"内容: {news['content'][:100]}...")
+                                            st.markdown("---")
+                                else:
+                                    st.warning("未找到相关新闻")
+                            except Exception as e:
+                                st.error(f"新闻获取失败: {e}")
             
             return st.button("🚀 生成推荐", type="primary")
     
@@ -421,7 +501,7 @@ class StockRecommendationApp:
                     
                     # Calculate factors and scores
                     factors = _self.factor_calculator.compute_basic_factors(stock.to_dict(), stock_daily)
-                    scores = _self.score_calculator.compute_score(factors, stock_daily)
+                    scores = _self.score_calculator.compute_score(factors, stock_daily, ts_code)
                     
                     # Combine results
                     result = {
@@ -460,26 +540,31 @@ class StockRecommendationApp:
         
         st.subheader(f"📊 推荐结果 (前{config.DEFAULT_TOP_N})")
         
-        # Show summary table
-        display_columns = ['ts_code', 'name', 'final_score', 'market', 'is_realtime']
+        # Show summary table with news sentiment
+        display_columns = ['ts_code', 'name', 'final_score', 'news_sentiment', 'market', 'is_realtime']
         display_df = recommendations_df[display_columns].head(config.DEFAULT_TOP_N)
-        display_df.columns = ['代码', '名称', '得分', '市场', '实时数据']
+        display_df.columns = ['代码', '名称', '综合得分', '新闻情绪', '市场', '实时数据']
         
         st.dataframe(
             display_df.style.format({
-                '得分': '{:.3f}',
+                '综合得分': '{:.3f}',
+                '新闻情绪': '{:.3f}',
                 '实时数据': lambda x: '✓' if x else '✗'
-            }).background_gradient(subset=['得分'], cmap='RdYlGn'),
+            }).background_gradient(subset=['综合得分', '新闻情绪'], cmap='RdYlGn'),
             use_container_width=True
         )
         
         # Show basic statistics
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("推荐股票数", len(display_df))
         with col2:
-            st.metric("平均得分", f"{display_df['得分'].mean():.3f}")
+            st.metric("平均得分", f"{display_df['综合得分'].mean():.3f}")
         with col3:
+            avg_sentiment = display_df['新闻情绪'].mean()
+            sentiment_emoji = "😊" if avg_sentiment > 0.1 else "😐" if avg_sentiment > -0.1 else "😟"
+            st.metric("平均新闻情绪", f"{avg_sentiment:.3f} {sentiment_emoji}")
+        with col4:
             realtime_count = display_df['实时数据'].sum()
             st.metric("实时数据源", f"{realtime_count}/{len(display_df)}")
     
@@ -496,6 +581,12 @@ class StockRecommendationApp:
                 
                 if available_sources:
                     st.success(f"可用数据源: {', '.join(available_sources)}")
+                    
+                    # Show TinyShare status
+                    if TINYSHARE_AVAILABLE:
+                        st.success("✅ TinyShare 新闻数据源已就绪")
+                    else:
+                        st.warning("⚠️ TinyShare 新闻数据源未可用")
                 else:
                     st.error("无可用数据源，请安装相关依赖")
                     return

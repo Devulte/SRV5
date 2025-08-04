@@ -96,7 +96,7 @@ class NewsConfig:
     """News processing configuration"""
     # TinyShare configuration
     TINYSHARE_TOKEN: str = "2cGxAf73bwxidFp688OMckn24Ie2Glw9B61H8gmqbs0200FGv46J8jVd8718e62c"
-    TINYSHARE_BASE_URL: str = "https://api.tinyshare.cn"
+    # Note: TINYSHARE_BASE_URL not needed as we use the tinyshare library directly
     
     # News processing limits
     MAX_NEWS_PER_STOCK: int = 20

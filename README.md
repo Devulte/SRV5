@@ -125,6 +125,7 @@ MAX_STOCKS=200 BATCH_SIZE=10 streamlit run SRV4_optimized.py
 ```bash
 # 核心配置
 export TUSHARE_TOKEN="your_token_here"
+export TINYSHARE_TOKEN="your_tinyshare_token_here"
 export ENVIRONMENT="production"
 
 # 性能调优
@@ -135,12 +136,33 @@ export MAX_WORKERS=3         # 并发工作线程
 # 功能开关
 export ENABLE_ADVANCED_ML=false          # 高级ML模型
 export ENABLE_HYPERPARAMETER_TUNING=false # 超参数调优
+export ENABLE_NEWS_SENTIMENT=true        # 新闻情感分析
 ```
 
 ### 运行时配置
 - 推荐数量: 5-20只股票
 - 历史数据天数: 10/30/60天
 - 实时数据优先级配置
+
+## 📰 新闻情感分析
+
+### TinyShare 集成特性
+- 实时中文股市新闻获取
+- 智能新闻情感分析
+- 个股新闻情绪评分
+- 市场整体情绪监控
+
+### 新闻处理流程
+```python
+# 获取个股新闻
+news_items = news_processor.get_cached_news("000001", days_back=7)
+
+# 计算情感指标
+sentiment_metrics = news_processor.calculate_stock_sentiment(news_items)
+
+# 集成到推荐系统
+final_score = base_score * 0.85 + news_sentiment * 0.15
+```
 
 ## 🔍 性能监控
 
@@ -190,11 +212,13 @@ docker run -p 8501:8501 -e TUSHARE_TOKEN=your_token stock-recommendation
 ### 数据源
 - **Tushare Pro**: 主要数据源，提供全面的股票数据
 - **AKShare**: 实时数据源，响应速度快
+- **TinyShare**: 专业新闻数据源，提供中文股市新闻和情绪分析
 - **BaoStock**: 备用数据源，确保数据可用性
 
 ### 机器学习
 - **简化因子**: 北向资金、换手率、回调幅度、龙虎榜
-- **多模型融合**: CatBoost + LSTM + 情感分析 + 逻辑回归
+- **多模型融合**: CatBoost + LSTM + 新闻情感分析 + 逻辑回归
+- **新闻情感分析**: 基于TinyShare的实时中文新闻情感分析
 - **可选高级功能**: 超参数调优、动态因子选择
 
 ### 用户界面
