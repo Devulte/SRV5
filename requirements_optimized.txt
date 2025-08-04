@@ -1,0 +1,26 @@
+# Core dependencies - always loaded
+streamlit>=1.28.0
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Optional ML dependencies - loaded on demand
+scikit-learn>=1.3.0  # For basic ML features
+plotly>=5.15.0  # For charts
+
+# Optional data sources - loaded conditionally
+tushare>=1.2.89  # Primary data source
+akshare>=1.12.0  # Alternative real-time data
+baostock>=0.8.8  # Fallback data source
+
+# Optional advanced ML - loaded only when needed
+catboost>=1.2.0  # Advanced ML model
+optuna>=3.3.0  # Hyperparameter tuning
+
+# Text processing - loaded conditionally
+jieba>=0.42.1  # Chinese text segmentation
+
+# System monitoring - for performance info
+psutil>=5.9.0
+
+# Utilities
+retrying>=1.3.4  # Retry mechanisms
